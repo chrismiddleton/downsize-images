@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+
+# Usage: downsize-images
+# This is a script which attempts to convert all JPEG images in the current directory into TIFFs.
+# It is useful for converting a bunch of photographed images of documents into something
+# more closely resembling a scan, e.g. for converting a photo of a receipt taken by your phone.
+# This script assumes that you have a few commands available - convert, open, and trash - and that you
+# are running the script from a GUI so that the open command will show you the image.
+# The program attempts to convert the image into a black and white image first, since the file size will be smaller,
+# but gives the user the option of converting into a grayscale image instead.
+# Following this, the program prompts before deleting the original file.
+# The maximum dimensions of the images after resizing are hard-coded as either 1250x1250 for black and white or 750x750 for grayscale.
+# Images ending in any letter case of jpg or jpeg are found.
+# This script sets both the nullglob and nocaseglob shell options.
+# If any of the commands fail, the user is given the option of continuing the script or exiting.
+
+shopt -s nullglob
+shopt -s nocaseglob
+
+upper_case_first () {
+	echo "Arg 1: $1" # fdo
+	echo "$(echo "${1:0:1}" | tr [:lower:] [:upper:])${1:1}"
+}
+
+run_command () {
+	action="$1"
+	shift
+	echo "$(upper_case_first "$action")"
+	"$@"
+	status=$?
+	if [ "$status" -ne 0 ] ; then
+		echo "Error $1, status: $status. Continue? [y/n]"
+		read answer
+		if [ \( "x$answer" != "xy" \) -a \( "x$answer" != "xY" \) ] ; then
+			echo "Exiting..."
+			exit 1
+		fi
+	fi
+	return 0
+}
+
+# Attempts to convert all the files given as arguments into either black-and-white Group4-compressed or
+# grayscale LZW-compressed TIFFs. The images are also reduced in size, to either 1250x1250 in the black and white case
+# or 750x750 in the grayscale case.
+# (The black and white images have a higher max size since features are more easily lost.)
+# Each converted image is opened in Preview in order to give the user a chance to see how the conversion went.
+# After the conversion is done, the script offers to delete the original image.
+# Images starting with '-' are skipped to avoid issues when calling ImageMagick, and if the output file already exists,
+# the image is also skipped.
+downsize_images () {
+
+	local answer=
+	local output_file=
+	local status=
+	
+	if ! which convert > /dev/null ; then
+		echo -n "Missing ImageMagick 'convert' command. Download ImageMagick first, e.g. by running "
+		echo "'brew install imagemagick' if on a Mac."
+		exit 1
+	fi
+	if ! which open > /dev/null ; then
+		# if no open command, then we are not on a Mac, so try xdg-open, which is in most Linux distros
+		alias open='xdg-open &>/dev/null'
+		echo "Missing 'open' command"
+		exit 1
+	fi
+	if ! which trash > /dev/null ; then
+		echo -n "Missing 'trash' command. Download with 'brew install trash' on a Mac or"
+		echo " 'sudo apt-get install trash-cli' on some Linux distros for a similar program."
+		exit 1
+	fi
+	
+	for f in "$@" ; do
+		
+		if [ "${file:0:1}" = "-" ] ; then
+			echo "Warning: file '$f' could be interpreted as an option. Skipping..."
+			continue
+		fi
+		
+		output_file="${f%.jpg}.tif"
+		
+		if [ -e "$output_file" ] ; then
+			echo "Warning: output file '$output_file' already exists. Skipping..."
+			continue
+		fi
+		
+		run_command "converting '$f' to black and white" \
+			convert "$f" -threshold 40% -resize '1250x1250>' -type bilevel -compress Group4 "$output_file"
+		
+		run_command "previewing '$f'" open -- "$output_file"
+		
+		echo -n "Try conversion to grayscale instead? [y/n] "
+		read answer
+		if [ "x$answer" = "xy" ] ; then
+			run_command "converting '$f' to grayscale" \
+				convert "$f" -colorspace Gray -separate -average -resize '750x750>' -compress LZW "$output_file"
+			run_command "previewing '$f'" open -- "$output_file"
+		fi
+		
+		echo -n "Delete old file ($f)? [y/n] "
+		read answer
+		if [ "x$answer" = "xy" ] ; then
+			echo "Deleting $f..."
+			run_command "moving '$f' to trash" trash -- "$f"
+		fi
+		
+	done
+	
+}
+
+downsize_images *.jpg *.jpeg
