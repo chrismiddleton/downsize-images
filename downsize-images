@@ -18,7 +18,6 @@ shopt -s nullglob
 shopt -s nocaseglob
 
 upper_case_first () {
-	echo "Arg 1: $1" # fdo
 	echo "$(echo "${1:0:1}" | tr [:lower:] [:upper:])${1:1}"
 }
 
